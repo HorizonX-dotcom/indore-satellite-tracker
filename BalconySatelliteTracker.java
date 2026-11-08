@@ -16,34 +16,36 @@ import java.util.regex.Pattern;
 
 public class BalconySatelliteTracker {
 
-    // 1. Exact Coordinates from your Google Earth pin (Bajaj Ji Dreams, Vigyan Nagar)
+    // 1. Observer Coordinates: Bajaj Ji Dreams, Vigyan Nagar, Indore
     private static final double OBSERVER_LAT = 22.6766;
     private static final double OBSERVER_LON = 75.8323;
     private static final double EARTH_RADIUS_KM = 6371.0;
 
-    // 2. Balcony Facing: Directly SOUTH towards the lane (190° azimuth)
+    // 2. Balcony orientation: SOUTH toward the lane (~190° azimuth)
     private static final double BALCONY_FACING_AZIMUTH = 190.0;
 
-    // 3. ntfy Phone Push Topic (Subscribe to this exact name in the free ntfy mobile app)
+    // 3. ntfy Phone Push Topic
     private static final String NTFY_TOPIC = "indore_balcony_iss_alert";
 
-    // State tracking to prevent duplicate spam notifications
+    // Track stages to prevent duplicate alerts
     private static boolean wakeUpAlertSent = false;
     private static boolean balconyPrepAlertSent = false;
+    private static boolean livePassAlertSent = false;
 
     private static final HttpClient client = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(6))
             .build();
 
+    private static final DateTimeFormatter TIME_FORMAT = DateTimeFormatter.ofPattern("hh:mm:ss a");
+
     public static void main(String[] args) {
         System.out.println("==========================================================================");
-        System.out.println("   ISS EARLY-MORNING BALCONY SPOTTER (BAJAJ JI DREAMS, INDORE)");
-        System.out.println("   Station: " + OBSERVER_LAT + "° N, " + OBSERVER_LON + "° E | Balcony Facing: SOUTH (Lane)");
-        System.out.println("   Phone Alarm: https://ntfy.sh/" + NTFY_TOPIC);
-        System.out.println("   [Press Ctrl+C in terminal to stop at any time]");
+        System.out.println("   ISS DAWN BALCONY DISPATCHER & ALARM ENGINE");
+        System.out.println("   Location: Bajaj Ji Dreams, Indore (" + OBSERVER_LAT + "° N, " + OBSERVER_LON + "° E)");
+        System.out.println("   Balcony View: SOUTH across the lane (" + BALCONY_FACING_AZIMUTH + "°)");
+        System.out.println("   Alert Channel: https://ntfy.sh/" + NTFY_TOPIC);
+        System.out.println("   [Press Ctrl+C to stop]");
         System.out.println("==========================================================================");
-
-        DateTimeFormatter dtf = DateTimeFormatter.ofPattern("hh:mm:ss a");
 
         while (true) {
             try {
@@ -65,43 +67,55 @@ public class BalconySatelliteTracker {
                     int hour = nowIst.getHour();
                     boolean isDawnOrDusk = (hour >= 5 && hour <= 6) || (hour >= 18 && hour <= 19);
 
-                    // Compute balcony-relative instruction tailored to your lane view
-                    String relativeBearing = getBalconyLookInstruction(azimuthDeg);
-                    boolean isVisibleFromBalcony = !relativeBearing.contains("BLOCKED");
+                    String relativeLook = getBalconyLookInstruction(azimuthDeg);
+                    boolean isVisibleSector = !relativeLook.contains("BLOCKED");
+                    boolean isSunlit = visibility.equalsIgnoreCase("daylight");
 
-                    // STAGE 1: EARLY WAKE-UP ALARM (~4 to 5 minutes before peak)
-                    if (surfaceDistKm <= 1800 && surfaceDistKm > 900 && isDawnOrDusk && visibility.equalsIgnoreCase("daylight") && isVisibleFromBalcony && !wakeUpAlertSent) {
+                    // STAGE 1: WAKE-UP ALARM (~15-20 min window equivalent: approaching regional corridor)
+                    if (surfaceDistKm <= 2200 && surfaceDistKm > 1200 && isDawnOrDusk && isSunlit && isVisibleSector && !wakeUpAlertSent) {
                         String title = "⏰ WAKE UP! ISS Approaching Indore!";
-                        String body = "Pass visible from your south balcony in ~4 minutes. Head outside!";
-                        sendPhoneAlarm(title, body, 5); // Priority 5 rings like an alarm
+                        String body = "Dawn flyby visible from your south balcony in ~15 minutes. Time to get out of bed!";
+                        sendPhoneAlarm(title, body, 5, "alarm_clock,satellite");
                         wakeUpAlertSent = true;
+                        System.out.println("[DISPATCH] Sent Stage 1 Wake-up Alarm.");
                     }
 
-                    // STAGE 2: BALCONY LIVE GUIDANCE (Above roofline > 15°)
-                    if (elevationDeg >= 15.0 && isDawnOrDusk && visibility.equalsIgnoreCase("daylight") && isVisibleFromBalcony && !balconyPrepAlertSent) {
-                        String title = "👀 LOOK UP NOW!";
-                        String body = "Look " + relativeBearing + ", " + Math.round(elevationDeg) + "° UP above the horizon!";
-                        sendPhoneAlarm(title, body, 4);
+                    // STAGE 2: 2-MINUTE WARNING (Approaching local horizon, getting into position)
+                    if (surfaceDistKm <= 900 && surfaceDistKm > 450 && isDawnOrDusk && isSunlit && isVisibleSector && !balconyPrepAlertSent) {
+                        String title = "👀 GO TO BALCONY NOW (2 Min Warning)";
+                        String body = "Step out to the lane-facing balcony. It will enter your sky view from " + relativeLook + ".";
+                        sendPhoneAlarm(title, body, 4, "bell,walking");
                         balconyPrepAlertSent = true;
+                        System.out.println("[DISPATCH] Sent Stage 2 Balcony Warning.");
                     }
 
-                    // Reset flags after flyby
-                    if (surfaceDistKm > 2500) {
+                    // STAGE 3: LIVE PASS INSTRUCTIONS (Above rooftops, actively visible)
+                    if (elevationDeg >= 15.0 && isDawnOrDusk && isSunlit && isVisibleSector && !livePassAlertSent) {
+                        String title = "🌟 LOOK UP NOW! ISS Visible!";
+                        String body = "Look " + relativeLook + " and " + Math.round(elevationDeg) + "° UP! Look for a silent, steady white beacon.";
+                        sendPhoneAlarm(title, body, 5, "star,eyes");
+                        livePassAlertSent = true;
+                        System.out.println("[DISPATCH] Sent Stage 3 Live Sighting Guide.");
+                    }
+
+                    // Reset state flags after satellite passes beyond 2800 km
+                    if (surfaceDistKm > 2800) {
                         wakeUpAlertSent = false;
                         balconyPrepAlertSent = false;
+                        livePassAlertSent = false;
                     }
 
-                    // Live console output
-                    System.out.printf("[%s] Dist: %.0f km | Elev: %.1f° | Azimuth: %.0f° -> %s | Status: %s%n",
-                            nowIst.format(dtf), slantRangeKm, elevationDeg, azimuthDeg, relativeBearing,
-                            (elevationDeg > 15.0 && isVisibleFromBalcony && visibility.equalsIgnoreCase("daylight")) ? "★ VISIBLE!" : "Tracking");
+                    // Console status
+                    System.out.printf("[%s] Dist: %.0f km | Elev: %.1f° | Heading: %.0f° -> %s | Light: %s%n",
+                            nowIst.format(TIME_FORMAT), slantRangeKm, elevationDeg, azimuthDeg, relativeLook,
+                            isSunlit ? "SUNLIT" : "SHADOW");
                 }
             } catch (Exception e) {
-                System.out.println("[Notice] Connection poll: " + e.getMessage());
+                System.out.println("[Poll Note] " + e.getMessage());
             }
 
             try {
-                Thread.sleep(4000);
+                Thread.sleep(5000);
             } catch (InterruptedException ie) {
                 System.out.println("\n[Terminated]");
                 break;
@@ -110,25 +124,24 @@ public class BalconySatelliteTracker {
     }
 
     private static String getBalconyLookInstruction(double targetAzimuth) {
-        // Difference relative to your south-facing balcony (190°)
         double diff = (targetAzimuth - BALCONY_FACING_AZIMUTH + 360.0) % 360.0;
 
-        if (diff >= 340 || diff <= 20) {
-            return "STRAIGHT AHEAD across the lane";
-        } else if (diff > 20 && diff < 80) {
+        if (diff >= 345 || diff <= 15) {
+            return "STRAIGHT AHEAD (South)";
+        } else if (diff > 15 && diff < 85) {
             return (int) diff + "° to your RIGHT (towards West)";
-        } else if (diff >= 80 && diff <= 105) {
-            return "90° HARD RIGHT along the road";
-        } else if (diff > 280 && diff < 340) {
+        } else if (diff >= 85 && diff <= 105) {
+            return "90° HARD RIGHT (West wall)";
+        } else if (diff > 275 && diff < 345) {
             return (int) (360 - diff) + "° to your LEFT (towards East)";
-        } else if (diff >= 255 && diff <= 280) {
-            return "90° HARD LEFT along the road";
+        } else if (diff >= 255 && diff <= 275) {
+            return "90° HARD LEFT (East wall)";
         } else {
-            return "BLOCKED BY BUILDING (Behind balcony / North side)";
+            return "BLOCKED BY BUILDING (North side)";
         }
     }
 
-    private static void sendPhoneAlarm(String title, String message, int priority) {
+    private static void sendPhoneAlarm(String title, String message, int priority, String tags) {
         new Thread(() -> {
             try {
                 URL url = new URI("https://ntfy.sh/" + NTFY_TOPIC).toURL();
@@ -137,7 +150,7 @@ public class BalconySatelliteTracker {
                 conn.setDoOutput(true);
                 conn.setRequestProperty("Title", title);
                 conn.setRequestProperty("Priority", String.valueOf(priority));
-                conn.setRequestProperty("Tags", "satellite,alarm_clock");
+                conn.setRequestProperty("Tags", tags);
 
                 byte[] out = message.getBytes(StandardCharsets.UTF_8);
                 conn.setFixedLengthStreamingMode(out.length);
